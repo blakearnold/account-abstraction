@@ -53,9 +53,7 @@ contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
             uint256 validationData,
             uint256 paymasterValidationData
         ) = _validatePrepayment(0, userOp, outOpInfo);
-        StakeInfo memory paymasterInfo = _getStakeInfo(
-            outOpInfo.mUserOp.paymaster
-        );
+        StakeInfo memory paymasterInfo;
         StakeInfo memory senderInfo = _getStakeInfo(outOpInfo.mUserOp.sender);
         StakeInfo memory factoryInfo;
         {
@@ -68,8 +66,8 @@ contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
 
         address aggregator = address(uint160(validationData));
         ReturnInfo memory returnInfo = ReturnInfo(
-            outOpInfo.preOpGas,
-            outOpInfo.prefund,
+            0,
+            0,
             validationData,
             paymasterValidationData,
             getMemoryBytesFromOffset(outOpInfo.contextOffset)
@@ -108,15 +106,15 @@ contract EntryPointSimulations is EntryPoint, IEntryPointSimulations {
             uint256 paymasterValidationData
         ) = _validatePrepayment(0, op, opInfo);
 
-        uint256 paid = _executeUserOp(0, op, opInfo);
+        _executeUserOp(op, opInfo);
         bool targetSuccess;
         bytes memory targetResult;
         if (target != address(0)) {
             (targetSuccess, targetResult) = target.call(targetCallData);
         }
         return ExecutionResult(
-            opInfo.preOpGas,
-            paid,
+            0,
+            0,
             validationData,
             paymasterValidationData,
             targetSuccess,
