@@ -9,9 +9,9 @@ import "../interfaces/IPaymaster.sol";
 import "../interfaces/IEntryPoint.sol";
 
 import "../utils/Exec.sol";
+import "./StakeManager.sol";
 import "./SenderCreator.sol";
 import "./Helpers.sol";
-import "./StakeManager.sol";
 import "./NonceManager.sol";
 import "./UserOperationLib.sol";
 
@@ -24,7 +24,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  */
 
 /// @custom:security-contact https://bounty.ethereum.org
-contract EntryPoint is IEntryPoint, NonceManager, StakeManager, ReentrancyGuard, ERC165 {
+contract EntryPoint is IEntryPoint, StakeManager, NonceManager, ReentrancyGuard, ERC165 {
 
     using UserOperationLib for PackedUserOperation;
 
@@ -35,7 +35,6 @@ contract EntryPoint is IEntryPoint, NonceManager, StakeManager, ReentrancyGuard,
     }
 
     uint256 private constant REVERT_REASON_MAX_LEN = 2048;
-    uint256 private constant PENALTY_PERCENT = 10;
 
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) public view virtual override returns (bool) {
@@ -56,9 +55,10 @@ contract EntryPoint is IEntryPoint, NonceManager, StakeManager, ReentrancyGuard,
         PackedUserOperation calldata userOp,
         UserOpInfo memory opInfo
     )
-    internal {
+    internal {    
         bytes memory context = getMemoryBytesFromOffset(opInfo.contextOffset);
         bool success;
+        bytes memory returndata; // Add this to capture returndata
         {
             bytes calldata callData = userOp.callData;
             bytes memory innerCall;
@@ -77,24 +77,26 @@ contract EntryPoint is IEntryPoint, NonceManager, StakeManager, ReentrancyGuard,
                 innerCall = abi.encodeCall(this.innerHandleOp, (callData, opInfo, context));
             }
             assembly ("memory-safe") {
-                success := call(gas(), address(), 0, add(innerCall, 0x20), mload(innerCall), 0, 32)
+                let ptr := mload(0x40) // Free memory pointer
+                success := call(gas(), address(), 0, add(innerCall, 0x20), mload(innerCall), ptr, 32)
+                let size := returndatasize()
+                returndata := mload(0x40) // Free memory pointer
+                mstore(0x40, add(returndata, and(add(add(size, 0x20), 0x1f), not(0x1f)))) // Update free memory pointer
+                mstore(returndata, size)
+                returndatacopy(add(returndata, 0x20), 0, size)
             }
         }
         if (!success) {
-            bytes32 innerRevertCode;
-            assembly ("memory-safe") {
-                let len := returndatasize()
-                if eq(32,len) {
-                    returndatacopy(0, 0, 32)
-                    innerRevertCode := mload(0)
+            if (returndata.length > 0) {
+                // The call reverted with a revert reason
+                assembly {
+                    let returndata_size := mload(returndata)
+                    revert(add(returndata, 32), returndata_size)
                 }
+            } else {
+                // The call reverted without a revert reason
+                revert("Transaction reverted without a reason");
             }
-            emit PostOpRevertReason(
-                opInfo.userOpHash,
-                opInfo.mUserOp.sender,
-                opInfo.mUserOp.nonce,
-                Exec.getReturnData(REVERT_REASON_MAX_LEN)
-            );
         }
     }
 
